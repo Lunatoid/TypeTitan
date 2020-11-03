@@ -1,0 +1,82 @@
+name: Build
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build-windows:
+    if: github.event_name == 'push' && contains(toJson(github.event.commits), '***NO_CI***') == false && contains(toJson(github.event.commits), '[ci skip]') == false && contains(toJson(github.event.commits), '[skip ci]') == false
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Cache LLVM and Clang
+        id: cache-llvm
+        uses: actions/cache@v2
+        with:
+          path: ${{ runner.temp }}/llvm
+          key: llvm-10.0
+
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@v1
+        with:
+          version: "10.0"
+          directory: ${{ runner.temp }}/llvm
+          cached: ${{ steps.cache-llvm.outputs.cache-hit }}
+         
+      - name: Build TypeTitan
+        run: |
+          mkdir ${{ github.workspace }}/bin
+          clang++ ${{ github.workspace }}/src/*.cpp -xc++ -std=c++17 -Os -I "${{ runner.temp }}/llvm/include" -L "${{ runner.temp }}/llvm/lib" -l libclang.lib -Wno-switch -o ${{ github.workspace }}/bin/tt.exe
+      
+      - name: Copy dependencies
+        run: |
+          mkdir ${{ github.workspace }}/dynlib
+          copy "${{ runner.temp }}/llvm/bin/libclang.dll" "${{ github.workspace }}/dynlib"
+        
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v1.0.0
+        with:
+          name: windows-x64
+          path: ${{ github.workspace }}/bin
+          
+      - name: Upload Dependencies
+        uses: actions/upload-artifact@v1.0.0
+        with:
+          name: windows-x64-libclang
+          path: ${{ github.workspace }}/dynlib
+          
+  build-ubuntu:
+    if: github.event_name == 'push' && contains(toJson(github.event.commits), '***NO_CI***') == false && contains(toJson(github.event.commits), '[ci skip]') == false && contains(toJson(github.event.commits), '[skip ci]') == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Cache LLVM and Clang
+        id: cache-llvm
+        uses: actions/cache@v2
+        with:
+          path: ${{ runner.temp }}/llvm
+          key: llvm-10.0
+
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@v1
+        with:
+          version: "10.0"
+          directory: ${{ runner.temp }}/llvm
+          cached: ${{ steps.cache-llvm.outputs.cache-hit }}
+
+      - name: Build TypeTitan
+        run: |
+          mkdir ${{ github.workspace }}/bin
+          clang++ ${{ github.workspace }}/src/*.cpp -xc++ -std=c++17 -Os -I "${{ runner.temp }}/llvm/include" -L "${{ runner.temp }}/llvm/lib" -l clang -Wno-switch -o ${{ github.workspace }}/bin/tt
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v1.0.0
+        with:
+          name: ubuntu-x64
+          path: ${{ github.workspace }}/bin
+
