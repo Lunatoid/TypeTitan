@@ -17,7 +17,7 @@ This is also used for primitive types like integers and floats.
 struct TypeInfo {
     TypeInfoType type;     // What derived TypeInfo class it uses.
     const char* type_name; // A stringified version of the type e.g. "POD"
-    uint32_t type_id;      // A unique integer representing this specific type
+    uint64_t type_id;      // A hash of the qualified type name (e.g. hash of "my_namespace::detail::POD")
     uint32_t size;         // The size in bytes (if applicable)
 };
 ```
