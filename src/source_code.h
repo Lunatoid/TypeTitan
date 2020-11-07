@@ -169,14 +169,23 @@ public:
         success = true;
         return (b.*Member)(args...);
     }
+    
+    Result call(Result(Base::*Member)(Args... args) const, bool& success, Base& b, Args... args) {
+        success = true;
+        return (b.*Member)(args...);
+    }
 
     template<typename T>
     Result call(T t, bool& success, Base& b, Args... args) {
         success = false;
         return Result();
     }
-
+    
     bool valid(Result(Base::*Member)(Args... args)) {
+        return true;
+    }
+
+    bool valid(Result(Base::*Member)(Args... args) const) {
         return true;
     }
 
