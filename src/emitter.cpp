@@ -330,11 +330,11 @@ void emit_record_generic(std::ostream& output, CXCursor cursor, std::vector<std:
             // We get the canonical type because with some template types it would skip
             // the namespace
             CXType cursorType = clang_getCursorType(data.fields[i]);
-            ClangStr qualified_name = clang_getTypeSpelling(clang_getCanonicalType(cursorType));
+            ClangStr field_name = clang_getTypeSpelling(clang_getCanonicalType(cursorType));
             ClangStr name = clang_getCursorSpelling(data.fields[i]);
-            
+
             output <<
-                "            fields[" << i << "].type_info = type_of<" << qualified_name.c_str() << ">();\n"
+                "            fields[" << i << "].type_info = type_of<" << field_name.c_str() << ">();\n"
                 "            fields[" << i << "].name = \"" << name.c_str() << "\";\n";
 
             std::vector<std::string> field_args;
@@ -375,8 +375,9 @@ void emit_record_generic(std::ostream& output, CXCursor cursor, std::vector<std:
         output << "            static TypeInfoFunction methods[" << data.methods.size() << "];\n";
 
         for (int i = 0; i < data.methods.size(); i++) {
-            CXType method_type = clang_getCursorType(data.methods[i]);
-            CXType return_type = clang_getResultType(method_type);
+            // We're getting the canonical type for the same reason as with the fields
+            CXType method_type = clang_getCanonicalType(clang_getCursorType(data.methods[i]));
+            CXType return_type = clang_getCanonicalType(clang_getResultType(method_type));
 
             add_nested_types(return_type);
 
@@ -830,7 +831,12 @@ void emit_primitive(std::ostream& output, const Primitive& type) {
 
     emit_common_start(output, suffix, type.type_name, type.qualified_type_name);
 
-    output << "\n            type.size = sizeof(" << type.qualified_type_name << ");\n";
+    // We can't do sizeof(void)
+    if (type.qualified_type_name != "void") {
+        output << "\n            type.size = sizeof(" << type.qualified_type_name << ");\n";
+    } else {
+        output << "\n            type.size = 0;\n";
+    }
 
     if (type.kind == CXType_ConstantArray) {
         output <<
