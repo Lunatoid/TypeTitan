@@ -5,14 +5,27 @@
 #include <map>
 #include <unordered_map>
 #include <algorithm>
+#include <memory>
 
 #include "helper.h"
 #include "source_code.h"
 
+struct Primitive {
+    CXTypeKind kind;
+    std::string type_name;
+    std::string qualified_type_name;
+
+    // If this primitive is Foo*** then `deepest` is Foo
+    std::shared_ptr<Primitive> deepest;
+
+    std::string underlying_name;
+    long long array_length;
+};
+
 // All the primitives to emit
 // key: qualified name
 // val: primitive type handle
-static std::map<std::string, CXType> primitives_to_emit;
+static std::map<std::string, Primitive> primitives_to_emit;
 
 // All the free functions that have been emitted
 // key: qualified name/signature
@@ -46,6 +59,9 @@ void add_nested_types(CXType type);
 // int& -> int
 bool add_nested_types(CXType type, CXTypeKind kind, CXType(get_nested)(CXType));
 
+// Creates a `Primitive` struct from `type`
+void create_primitive(CXType type, Primitive& p);
+
 // Emitting the specific types
 void emit_cursor(std::ostream& output, CXCursor cursor, std::vector<std::string>& args);
 void emit_record_generic(std::ostream& output, CXCursor cursor, std::vector<std::string>& args,
@@ -54,7 +70,7 @@ void emit_template_record(std::ostream& output, CXCursor cursor, std::vector<std
 void emit_record(std::ostream& output, CXCursor cursor, std::vector<std::string>& args);
 void emit_enum(std::ostream& output, CXCursor cursor, std::vector<std::string>& args);
 void emit_function(std::ostream& output, CXCursor cursor, std::vector<std::string>& args);
-void emit_primitive(std::ostream& output, CXType type);
+void emit_primitive(std::ostream& output, const Primitive& type);
 int emit_dependent_types(std::ostream& output);
 
 //
@@ -224,7 +240,7 @@ void emit_record(std::ostream& output, CXCursor cursor, std::vector<std::string>
 
     emit_common_start(output, "Record", type_name.c_str(), qualified_name.c_str());
 
-    output << "            type.size = " << clang_Type_getSizeOf(type) << ";\n\n";
+    output << "            type.size = sizeof(" << qualified_name.c_str() << ");\n\n";
 
     emit_record_generic(output, cursor, args, qualified_name.c_str(), "");
 }
@@ -311,9 +327,12 @@ void emit_record_generic(std::ostream& output, CXCursor cursor, std::vector<std:
         output << "            static RecordField fields[" << data.fields.size() << "];\n";
 
         for (int i = 0; i < data.fields.size(); i++) {
-            ClangStr qualified_name = clang_getTypeSpelling(clang_getCursorType(data.fields[i]));
+            // We get the canonical type because with some template types it would skip
+            // the namespace
+            CXType cursorType = clang_getCursorType(data.fields[i]);
+            ClangStr qualified_name = clang_getTypeSpelling(clang_getCanonicalType(cursorType));
             ClangStr name = clang_getCursorSpelling(data.fields[i]);
-
+            
             output <<
                 "            fields[" << i << "].type_info = type_of<" << qualified_name.c_str() << ">();\n"
                 "            fields[" << i << "].name = \"" << name.c_str() << "\";\n";
@@ -488,8 +507,7 @@ void emit_enum(std::ostream& output, CXCursor cursor, std::vector<std::string>& 
 
     emit_common_start(output, "Enum", type_name.c_str(), qualified_name.c_str());
 
-    output <<
-        "            type.size = " << clang_Type_getSizeOf(type) << ";\n\n";
+    output << "            type.size = sizeof(" << qualified_name.c_str() << ");\n\n";
 
     emit_tags(output, cursor, args);
 
@@ -749,51 +767,7 @@ bool add_nested_types(CXType type, CXTypeKind kind, CXType(get_nested)(CXType)) 
     return false;
 }
 
-void emit_primitive(std::ostream& output, CXType type) {
-    std::string suffix = "Primitive";
-
-    if (type.kind == CXType_ConstantArray) {
-        suffix = "Array";
-    } else if (type.kind == CXType_Pointer ||
-               type.kind == CXType_LValueReference ||
-               type.kind == CXType_RValueReference) {
-        suffix = "Indirect";
-    }
-
-    ClangStr type_name = clang_getTypeSpelling(type);
-
-    emit_common_start(output, suffix, type_name.c_str(), type_name.c_str());
-
-    long long size = clang_Type_getSizeOf(type);
-    output << "\n            type.size = " << ((size > 0) ? size : 0) << ";\n";
-
-    if (type.kind == CXType_ConstantArray) {
-        ClangStr element = clang_getTypeSpelling(clang_getElementType(type));
-
-        output <<
-            "            type.underlying = type_of<" << element.c_str() << ">();\n"
-            "            type.length = " << clang_getArraySize(type) << ";\n";
-    } else if (type.kind == CXType_Pointer ||
-               type.kind == CXType_LValueReference ||
-               type.kind == CXType_RValueReference) {
-        ClangStr pointee = clang_getTypeSpelling(clang_getPointeeType(type));
-
-        output << "            type.underlying = type_of<" << pointee.c_str() << ">();\n";
-
-        if (type.kind == CXType_Pointer) {
-            output << "            type.indirect_type = IndirectType::Pointer;\n";
-        } else if (type.kind == CXType_LValueReference) {
-            output << "            type.indirect_type = IndirectType::LReference;\n";
-        } else if (type.kind == CXType_RValueReference) {
-            output << "            type.indirect_type = IndirectType::RReference;\n";
-        }
-    }
-
-    emit_common_end(output);
-    output << "};\n\n";
-}
-
-int emit_dependent_types(std::ostream& output) {
+void create_primitive(CXType type, Primitive& p) {
     auto get_deepest_type = [](CXType type) -> CXType {
         if (type.kind == CXType_ConstantArray) {
             while (true) {
@@ -818,14 +792,78 @@ int emit_dependent_types(std::ostream& output) {
         return type;
     };
 
+    p.kind = type.kind;
+
+    p.qualified_type_name = ClangStr(clang_getTypeSpelling(type)).c_str();
+    p.type_name = p.qualified_type_name;
+
+    if (p.type_name.find(':') != std::string::npos) {
+        p.type_name.erase(0, p.type_name.rfind(':') + 1);
+    }
+
+    if (type.kind == CXType_ConstantArray) {
+        p.array_length = clang_getArraySize(type);
+        p.underlying_name = ClangStr(clang_getTypeSpelling(clang_getElementType(type))).c_str();
+
+        p.deepest = std::make_shared<Primitive>();
+        create_primitive(get_deepest_type(type), *p.deepest);
+    } else if (type.kind == CXType_Pointer ||
+               type.kind == CXType_LValueReference ||
+               type.kind == CXType_RValueReference) {
+        p.underlying_name = ClangStr(clang_getTypeSpelling(clang_getPointeeType(type))).c_str();
+
+        p.deepest = std::make_shared<Primitive>();
+        create_primitive(get_deepest_type(type), *p.deepest);
+    }
+}
+
+void emit_primitive(std::ostream& output, const Primitive& type) {
+    std::string suffix = "Primitive";
+
+    if (type.kind == CXType_ConstantArray) {
+        suffix = "Array";
+    } else if (type.kind == CXType_Pointer ||
+               type.kind == CXType_LValueReference ||
+               type.kind == CXType_RValueReference) {
+        suffix = "Indirect";
+    }
+
+    emit_common_start(output, suffix, type.type_name, type.qualified_type_name);
+
+    output << "\n            type.size = sizeof(" << type.qualified_type_name << ");\n";
+
+    if (type.kind == CXType_ConstantArray) {
+        output <<
+            "            type.underlying = type_of<" << type.underlying_name << ">();\n"
+            "            type.length = " << type.array_length << ";\n";
+    } else if (type.kind == CXType_Pointer ||
+               type.kind == CXType_LValueReference ||
+               type.kind == CXType_RValueReference) {
+        output << "            type.underlying = type_of<" << type.underlying_name << ">();\n";
+
+        if (type.kind == CXType_Pointer) {
+            output << "            type.indirect_type = IndirectType::Pointer;\n";
+        } else if (type.kind == CXType_LValueReference) {
+            output << "            type.indirect_type = IndirectType::LReference;\n";
+        } else if (type.kind == CXType_RValueReference) {
+            output << "            type.indirect_type = IndirectType::RReference;\n";
+        }
+    }
+
+    emit_common_end(output);
+    output << "};\n\n";
+}
+
+int emit_dependent_types(std::ostream& output) {
     int emitted = 0;
     // Emit primitives that are based on types from this translation unit
     // e.g. Foo* is a primitive type (pointer), but it's based on Foo (this translation unit)
     std::vector<std::string> to_erase;
     for (auto& type : primitives_to_emit) {
-        CXType deepest = get_deepest_type(type.second);
+        if (type.second.deepest == nullptr) continue;
 
-        if (deepest.kind < CXType_FirstBuiltin || deepest.kind > CXType_LastBuiltin) {
+        if (type.second.deepest->kind < CXType_FirstBuiltin ||
+            type.second.deepest->kind > CXType_LastBuiltin) {
             emit_primitive(output, type.second);
 
             emitted += 1;
@@ -850,7 +888,10 @@ bool add_primitive_type(CXType type) {
     ClangStr name = clang_getTypeSpelling(type);
 
     if (is_primitive && primitives_to_emit.find(name.c_str()) == primitives_to_emit.end()) {
-        primitives_to_emit[name.c_str()] = type;
+        Primitive p;
+        create_primitive(type, p);
+
+        primitives_to_emit[name.c_str()] = p;
         return true;
     }
 

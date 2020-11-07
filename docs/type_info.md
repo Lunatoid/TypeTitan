@@ -27,7 +27,7 @@ struct TypeInfo {
 ```cpp
 struct TypeInfoArray : public TypeInfo {
     const TypeInfo* underlying; // The underlying type
-    int length;                 // The length of the array
+    int64_t length;                 // The length of the array
 };
 ```
 If the array is multi-dimensional, the underlying type will be one dimension lower, e.g. `int[3][3][3]` -> `int[3][3]`.

@@ -8,6 +8,23 @@
 #include <Windows.h>
 #endif
 
+class Index {
+public:
+    Index() {
+        index = clang_createIndex(1, 0);
+    }
+
+    ~Index() {
+        clang_disposeIndex(index);
+    }
+
+    CXIndex get_index() const {
+        return index;
+    }
+
+private:
+    CXIndex index;
+};
 
 CXTranslationUnit parse_translation_unit(const char* contents, const char* filename,
                                          const std::vector<std::string>& clang_args, unsigned int flags) {
@@ -22,12 +39,12 @@ CXTranslationUnit parse_translation_unit(const char* contents, const char* filen
         c_args.push_back(arg.c_str());
     }
 
-    CXIndex index = clang_createIndex(1, 1);
-    CXTranslationUnit unit = clang_parseTranslationUnit(index, filename, c_args.data(), (int)c_args.size(), &unsaved_file, 1, flags);
+    static Index index;
+    CXTranslationUnit unit;
+    CXErrorCode error = clang_parseTranslationUnit2(index.get_index(), filename, c_args.data(), (int)c_args.size(),
+                                                    &unsaved_file, 1, flags, &unit);
 
-    clang_disposeIndex(index);
-
-    if (!unit) {
+    if (error != CXError_Success) {
         std::string error_string;
 
         for (int i = 0; i < (int)clang_getNumDiagnostics(unit); i++) {
@@ -37,7 +54,7 @@ CXTranslationUnit parse_translation_unit(const char* contents, const char* filen
             if (severity == CXDiagnostic_Error || severity == CXDiagnostic_Fatal) {
                 error_string += "    ";
 
-                CXString str = clang_formatDiagnostic(diag, CXDiagnostic_DisplayOption);
+                CXString str = clang_formatDiagnostic(diag, CXDiagnostic_DisplaySourceLocation);
                 error_string += clang_getCString(str);
                 clang_disposeString(str);
             }

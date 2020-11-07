@@ -90,7 +90,7 @@ struct TypeInfo {
 
 struct TypeInfoArray : public TypeInfo {
     const TypeInfo* underlying;
-    int length;
+    int64_t length;
 };
 
 struct TypeInfoIndirect : public TypeInfo {

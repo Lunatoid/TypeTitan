@@ -30,7 +30,7 @@ int main(int argc, char** argv) {
 
     std::string namespace_name = DEFAULT_NAMESPACE;
     bool gen_extras = !DEFAULT_NO_EXTRAS;
-    bool del_empty = !DEFAULT_NO_EMPTY;
+    bool del_empty = DEFAULT_NO_EMPTY;
     bool do_recurse = !DEFAULT_NO_RECURSIVE;
     std::string custom_include;
 
@@ -108,7 +108,7 @@ int main(int argc, char** argv) {
             }
 
             if (arg == "-clang") {
-                for (int j = i; j < argc; j++) {
+                for (int j = i + 1; j < argc; j++) {
                     clang_args.push_back(argv[j]);
                 }
 
@@ -257,6 +257,8 @@ int main(int argc, char** argv) {
 
         out.close();
 
+        clang_disposeTranslationUnit(unit);
+
         if (del_empty && emitted == 0) {
             fs::remove(new_path);
         }
@@ -264,7 +266,7 @@ int main(int argc, char** argv) {
 
     // Generate core file
     // If we have custom include specified then the core files are in a custom location already
-    if (!custom_include.empty()) {
+    if (custom_include.empty()) {
         std::cout << "[" << draw_symbol('*', Color::Green) << "] generating 'type_titan.h'\n";
 
         fs::path core_path = output_dir;
@@ -327,7 +329,8 @@ int main(int argc, char** argv) {
     auto duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
 
     std::cout <<
-        "\n[" << draw_symbol('~', Color::Cyan) << "] finished in " << (double)duration.count() / 1000.0 << "\n";
+        "\n[" << draw_symbol('~', Color::Cyan) << "] parsed " <<
+        files.size() << " files in " << (double)duration.count() / 1000.0 << " seconds\n";
 
     return 0;
 }
