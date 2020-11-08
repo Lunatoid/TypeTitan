@@ -368,6 +368,38 @@ TT_SPAN_HELPER(get_enum_values, int64_t, Enum, enum_values, enum_count);
 
 #undef TT_SPAN_HELPER
 
+// Casting
+
+template<typename T>
+static const T* cast(const TypeInfo* ti) {
+    static_assert(false, "invalid cast, T must be derived from TypeInfo");
+}
+
+template<>
+static const TypeInfoArray* cast(const TypeInfo* ti) {
+    return (ti && ti->type == TypeInfoType::Array) ? (const TypeInfoArray*)ti : nullptr;
+}
+
+template<>
+static const TypeInfoIndirect* cast(const TypeInfo* ti) {
+    return (ti && ti->type == TypeInfoType::Indirect) ? (const TypeInfoIndirect*)ti : nullptr;
+}
+
+template<>
+static const TypeInfoFunction* cast(const TypeInfo* ti) {
+    return (ti && ti->type == TypeInfoType::Function) ? (const TypeInfoFunction*)ti : nullptr;
+}
+
+template<>
+static const TypeInfoRecord* cast(const TypeInfo* ti) {
+    return (ti && ti->type == TypeInfoType::Record) ? (const TypeInfoRecord*)ti : nullptr;
+}
+
+template<>
+static const TypeInfoEnum* cast(const TypeInfo* ti) {
+    return (ti && ti->type == TypeInfoType::Enum) ? (const TypeInfoEnum*)ti : nullptr;
+}
+
 // Getting tags
 
 static Span<const char*> get_tags(const TypeInfo* ti) {
@@ -549,6 +581,23 @@ static FunctionParameter* get_parameter(const T& t, const char* parameter_name) 
     return get_parameter(type_of<T>(), parameter_name);
 }
 
+// Getting an enum name
+
+template<typename T>
+static const char* get_enum_name(const T& enum_value) {
+    const TypeInfo* ti = tt::type_of<T>();
+
+    if (const TypeInfoEnum* tie = cast<TypeInfoEnum>(ti)) {
+        for (int i = 0; i < tie->enum_count; i++) {
+            if (tie->enum_values[i] == (int64_t)enum_value) {
+                return tie->enum_names[i];
+            }
+        }
+    }
+
+    return "";
+}
+
 // Checking tags
 
 static bool has_tag(const TypeInfo* ti, const char* tag) {
@@ -690,38 +739,6 @@ static RecordAccess get_access() {
 template<typename T>
 static RecordAccess get_access(const T& t) {
     return get_access(type_of<T>());
-}
-
-// Casting
-
-template<typename T>
-static const T* cast(const TypeInfo* ti) {
-    static_assert(false, "invalid cast, T must be derived from TypeInfo");
-}
-
-template<>
-static const TypeInfoArray* cast(const TypeInfo* ti) {
-    return (ti && ti->type == TypeInfoType::Array) ? (const TypeInfoArray*)ti : nullptr;
-}
-
-template<>
-static const TypeInfoIndirect* cast(const TypeInfo* ti) {
-    return (ti && ti->type == TypeInfoType::Indirect) ? (const TypeInfoIndirect*)ti : nullptr;
-}
-
-template<>
-static const TypeInfoFunction* cast(const TypeInfo* ti) {
-    return (ti && ti->type == TypeInfoType::Function) ? (const TypeInfoFunction*)ti : nullptr;
-}
-
-template<>
-static const TypeInfoRecord* cast(const TypeInfo* ti) {
-    return (ti && ti->type == TypeInfoType::Record) ? (const TypeInfoRecord*)ti : nullptr;
-}
-
-template<>
-static const TypeInfoEnum* cast(const TypeInfo* ti) {
-    return (ti && ti->type == TypeInfoType::Enum) ? (const TypeInfoEnum*)ti : nullptr;
 }
 
 // Reading/writing arbitrary fields

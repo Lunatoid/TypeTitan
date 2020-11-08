@@ -63,6 +63,19 @@ Returns:
 ---
 
 ```cpp
+template<typename T>
+const T* cast(const TypeInfo*)
+```
+Info:
+  - Casts a `const TypeInfo*` to a derived class, for example: `const TypeInfoEnum* enum_ti = cast<TypeInfoEnum>(ti)`.
+  - Note that this isn't a generic `dynamic_cast` function, this is solely for casting `TypeInfo*`
+
+Returns:
+  - Returns the casted pointer if the types match. Otherwise it will return a `nullptr`.
+
+---
+
+```cpp
 Span<const char*> get_tags()
 ```
 Returns:
@@ -107,6 +120,18 @@ Returns:
 ---
 
 ```cpp
+const char* get_enum_name(const T& enum_value)
+```
+Parameters:
+  - `enum_value`:
+    - An indexed enum value.
+
+Returns:
+  - The stringified version of the enum value. If the value was not found or the enum is not indexed it will return an empty string.
+
+---
+
+```cpp
 bool has_tag(const char* tag)
 ```
 Parameters:
@@ -131,19 +156,6 @@ RecordAccess get_access()
 ```
 Returns:
   - Returns the access specifier. If there is no access specifier it will return `RecordAccess::Private`.
-
----
-
-```cpp
-template<typename T>
-const T* cast(const TypeInfo*)
-```
-Info:
-  - Casts a `const TypeInfo*` to a derived class, for example: `const TypeInfoEnum* enum_ti = cast<TypeInfoEnum>(ti)`.
-  - Note that this isn't a generic `dynamic_cast` function, this is solely for casting `TypeInfo*`
-
-Returns:
-  - Returns the casted pointer if the types match. Otherwise it will return a `nullptr`.
 
 ---
 
