@@ -62,6 +62,9 @@ bool add_nested_types(CXType type, CXTypeKind kind, CXType(get_nested)(CXType));
 // Creates a `Primitive` struct from `type`
 void create_primitive(CXType type, Primitive& p);
 
+// int*** -> int
+CXType get_deepest_type(CXType type);
+
 // Emitting the specific types
 void emit_cursor(std::ostream& output, CXCursor cursor, std::vector<std::string>& args);
 void emit_record_generic(std::ostream& output, CXCursor cursor, std::vector<std::string>& args,
@@ -109,6 +112,38 @@ int emit_eligable_children(std::ostream& output, CXCursor cursor) {
 }
 
 void emit_cursor(std::ostream& output, CXCursor cursor, std::vector<std::string>& args) {
+
+    // Check if we're a nested type of a template type
+    // e.g.
+    //
+    // >| template<typename T>
+    // >| struct Foo {
+    // >|
+    // >|     int a;
+    // >|
+    // >|     //!!
+    // >|     struct Bar {
+    // >|         int b;
+    // >|     };
+    // >|
+    // >| };
+    //
+    // We can't create TypeInfo for Bar because it's a dependent type
+    // of Foo.
+
+    CXCursor parent = clang_getCursorLexicalParent(cursor);
+    while (parent.kind != CXCursor_TranslationUnit) {
+        if (parent.kind == CXCursor_ClassTemplate) {
+            std::cout <<
+                "[" << draw_symbol('!', Color::Red) <<
+                "] can't index '" << ClangStr(clang_getCursorSpelling(cursor)).c_str() <<
+                "' because it's a dependent type\n";
+            return;
+        }
+
+        parent = clang_getCursorLexicalParent(parent);
+    }
+
     switch (clang_getCursorKind(cursor)) {
         case CXCursor_TypedefDecl: {
             CXType underlying = clang_getTypedefDeclUnderlyingType(cursor);
@@ -174,8 +209,19 @@ void emit_template_record(std::ostream& output, CXCursor cursor, std::vector<std
         return;
     }
 
-    CXType type = clang_getCursorType(cursor);
-    ClangStr type_name = clang_getCursorSpelling(cursor);
+    // clang_getCursorSpelling doesn't return the namespace so we construct
+    // it on our own
+    CXCursor parent = clang_getCursorLexicalParent(cursor);
+    std::string prefix = "";
+
+    while (parent.kind != CXCursor_TranslationUnit) {
+        prefix += ClangStr(clang_getCursorSpelling(parent)).c_str();
+        prefix += "::";
+
+        parent = clang_getCursorLexicalParent(parent);
+    }
+
+    std::string type_name = ClangStr(clang_getCursorSpelling(cursor)).c_str();
 
     struct TemplateData {
         std::vector<CXCursor> templates;
@@ -219,10 +265,10 @@ void emit_template_record(std::ostream& output, CXCursor cursor, std::vector<std
         }
     }
 
-    std::string qualified_name = type_name.c_str();
+    std::string qualified_name = prefix + ClangStr(clang_getCursorSpelling(cursor)).c_str();
     qualified_name += "<" + template_args + ">";
 
-    emit_common_start(output, "Record", type_name.c_str(), qualified_name, template_decl);
+    emit_common_start(output, "Record", type_name, qualified_name, template_decl);
 
     output << "            type.size = sizeof(" << qualified_name << ");\n\n";
 
@@ -329,8 +375,16 @@ void emit_record_generic(std::ostream& output, CXCursor cursor, std::vector<std:
         for (int i = 0; i < data.fields.size(); i++) {
             // We get the canonical type because with some template types it would skip
             // the namespace
-            CXType cursorType = clang_getCursorType(data.fields[i]);
-            ClangStr field_name = clang_getTypeSpelling(clang_getCanonicalType(cursorType));
+            CXType cursor_type = clang_getCursorType(data.fields[i]);
+
+            // If the type is a template parameter then the canonical type is something like
+            // type-parameter-0-0 instead of simply T
+            CXType field_type = get_deepest_type(cursor_type);
+            if (field_type.kind == CXType_Unexposed) {
+                field_type = cursor_type;
+            }
+
+            ClangStr field_name = clang_getTypeSpelling(field_type);
             ClangStr name = clang_getCursorSpelling(data.fields[i]);
 
             output <<
@@ -359,8 +413,6 @@ void emit_record_generic(std::ostream& output, CXCursor cursor, std::vector<std:
 
             output << "            fields[" << i << "].access = RecordAccess::" << access << ";\n\n";
 
-
-            CXType field_type = clang_getCursorType(data.fields[i]);
             add_nested_types(field_type);
         }
 
@@ -768,30 +820,32 @@ bool add_nested_types(CXType type, CXTypeKind kind, CXType(get_nested)(CXType)) 
     return false;
 }
 
-void create_primitive(CXType type, Primitive& p) {
-    auto get_deepest_type = [](CXType type) -> CXType {
-        if (type.kind == CXType_ConstantArray) {
-            while (true) {
-                type = clang_getElementType(type);
+CXType get_deepest_type(CXType type) {
+    if (type.kind == CXType_ConstantArray) {
+        while (true) {
+            type = clang_getElementType(type);
 
-                if (type.kind != CXType_ConstantArray) {
-                    break;
-                }
+            if (type.kind != CXType_ConstantArray) {
+                break;
             }
-        } else if (type.kind == CXType_Pointer) {
-            while (true) {
-                type = clang_getPointeeType(type);
-
-                if (type.kind != CXType_Pointer) {
-                    break;
-                }
-            }
-        } else if (type.kind == CXType_LValueReference || type.kind == CXType_RValueReference) {
-            type = clang_getPointeeType(type);
         }
+    } else if (type.kind == CXType_Pointer) {
+        while (true) {
+            type = clang_getPointeeType(type);
 
-        return type;
-    };
+            if (type.kind != CXType_Pointer) {
+                break;
+            }
+        }
+    } else if (type.kind == CXType_LValueReference || type.kind == CXType_RValueReference) {
+        type = clang_getPointeeType(type);
+    }
+
+    return type;
+}
+
+void create_primitive(CXType type, Primitive& p) {
+    
 
     p.kind = type.kind;
 
@@ -832,7 +886,8 @@ void emit_primitive(std::ostream& output, const Primitive& type) {
     emit_common_start(output, suffix, type.type_name, type.qualified_type_name);
 
     // We can't do sizeof(void)
-    if (type.qualified_type_name != "void") {
+    if (type.qualified_type_name != "void" &&
+        type.qualified_type_name != "const void") {
         output << "\n            type.size = sizeof(" << type.qualified_type_name << ");\n";
     } else {
         output << "\n            type.size = 0;\n";
