@@ -144,15 +144,16 @@ struct TypeInfoEnum : public TypeInfo {
     const char** tags;
 };
 
+static TypeInfo UNINDEXED_TYPE_INFO = {
+    TypeInfoType::Primitive,
+    "(unindexed)",
+    0, 0
+};
+
 template<typename T>
 struct Type {
     static const TypeInfo* info() {
-        static TypeInfo type;
-        type.type = TypeInfoType::Primitive;
-        type.type_id = 0;
-        type.type_name = "(unindexed)";
-
-        return &type;
+        return &UNINDEXED_TYPE_INFO;
     }
 
     template<typename Result, typename... Args>

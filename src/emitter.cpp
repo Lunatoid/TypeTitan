@@ -65,6 +65,8 @@ void create_primitive(CXType type, Primitive& p);
 // int*** -> int
 CXType get_deepest_type(CXType type);
 
+std::string get_namespace(CXCursor decl);
+
 // Emitting the specific types
 void emit_cursor(std::ostream& output, CXCursor cursor, std::vector<std::string>& args);
 void emit_record_generic(std::ostream& output, CXCursor cursor, std::vector<std::string>& args,
@@ -211,16 +213,7 @@ void emit_template_record(std::ostream& output, CXCursor cursor, std::vector<std
 
     // clang_getCursorSpelling doesn't return the namespace so we construct
     // it on our own
-    CXCursor parent = clang_getCursorLexicalParent(cursor);
-    std::string prefix = "";
-
-    while (parent.kind != CXCursor_TranslationUnit) {
-        prefix += ClangStr(clang_getCursorSpelling(parent)).c_str();
-        prefix += "::";
-
-        parent = clang_getCursorLexicalParent(parent);
-    }
-
+    std::string prefix = get_namespace(cursor);
     std::string type_name = ClangStr(clang_getCursorSpelling(cursor)).c_str();
 
     struct TemplateData {
@@ -380,16 +373,27 @@ void emit_record_generic(std::ostream& output, CXCursor cursor, std::vector<std:
             // If the type is a template parameter then the canonical type is something like
             // type-parameter-0-0 instead of simply T
             CXType field_type = get_deepest_type(cursor_type);
+            std::string prefix = "";
             if (field_type.kind == CXType_Unexposed) {
                 field_type = cursor_type;
+
+                CXCursor decl = clang_getTypeDeclaration(clang_getCanonicalType(field_type));
+                prefix = get_namespace(decl);
             }
 
             ClangStr field_name = clang_getTypeSpelling(field_type);
             ClangStr name = clang_getCursorSpelling(data.fields[i]);
 
-            output <<
-                "            fields[" << i << "].type_info = type_of<" << field_name.c_str() << ">();\n"
-                "            fields[" << i << "].name = \"" << name.c_str() << "\";\n";
+            // We can't call type_of on an anonymous declaration
+            CXCursor decl = clang_getTypeDeclaration(field_type);
+            if (clang_Cursor_isAnonymous(decl) ||
+                clang_Cursor_isAnonymousRecordDecl(decl)) {
+                output << "            fields[" << i << "].type_info = &UNINDEXED_TYPE_INFO;\n";
+            } else {
+                output << "            fields[" << i << "].type_info = type_of<" << prefix << field_name.c_str() << ">();\n";
+            }
+
+            output << "            fields[" << i << "].name = \"" << name.c_str() << "\";\n";
 
             std::vector<std::string> field_args;
             get_args(data.fields[i], field_args);
@@ -844,8 +848,33 @@ CXType get_deepest_type(CXType type) {
     return type;
 }
 
+std::string get_namespace(CXCursor decl) {
+    std::vector<std::string> hierarchy;
+
+    CXCursor parent = clang_getCursorLexicalParent(decl);
+    while (parent.kind != CXCursor_TranslationUnit) {
+        if (parent.kind >= CXCursor_FirstInvalid &&
+            parent.kind <= CXCursor_LastInvalid) {
+            return "";
+        }
+
+        hierarchy.push_back(ClangStr(clang_getCursorSpelling(parent)).c_str());
+
+        parent = clang_getCursorLexicalParent(parent);
+    }
+
+    std::reverse(hierarchy.begin(), hierarchy.end());
+
+    std::string prefix;
+    for (auto& step : hierarchy) {
+        prefix += step + "::";
+    }
+
+    return prefix;
+}
+
 void create_primitive(CXType type, Primitive& p) {
-    
+
 
     p.kind = type.kind;
 
